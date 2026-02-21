@@ -173,8 +173,8 @@
   ];
 
   // Outside-slope penalty (applied per second while outside)
-  const OUTSIDE_HEALTH_DRAIN_PER_S = 0.01;   // tune
-  const OUTSIDE_SCORE_DRAIN_PER_S  = 10;     // tune (points per second)
+  const OUTSIDE_HEALTH_DRAIN_PER_S = 0.03;   // tune
+  const OUTSIDE_SCORE_DRAIN_PER_S  = 60;     // tune (points per second)
 
   // =========================
   // 2) UI refs
@@ -654,6 +654,17 @@
     ctx.globalAlpha = 1;
   }
 
+  function drawOutsideTint(intensity){
+    if (intensity <= 0) return;
+
+    const alpha = Math.min(0.35, intensity);  // cap tint strength
+
+    ctx.save();
+    ctx.fillStyle = `rgba(180, 0, 0, ${alpha})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
   // =========================
   // 8) Reset & loop
   // =========================
@@ -710,8 +721,14 @@
      // penalize if skier is outside the ski-area defined by slope lines
       const sx = W/2 + x; // skier screen x
       const b = slopeBoundsAtY(skierY);
-      const outside = (sx < b.left) || (sx > b.right);
-      if (outside) {
+      let outsideIntensity = 0;
+      if (sx < b.left) {
+        outsideIntensity = 0.1 + (b.left - sx) / 300;   // 40px soft ramp
+      } else if (sx > b.right) {
+        outsideIntensity = 0.1 + (sx - b.right) / 300;
+      }
+
+      if (outsideIntensity > 0) {
         health = clamp(health - OUTSIDE_HEALTH_DRAIN_PER_S * dt, 0, 1);
         score -= OUTSIDE_SCORE_DRAIN_PER_S * dt;
       }
@@ -790,6 +807,8 @@
       }
       drawSkier();
       drawHUD();
+
+      drawOutsideTint(outsideIntensity);
 
       if (health <= 0){
         paused = true;
