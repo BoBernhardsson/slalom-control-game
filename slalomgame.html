@@ -59,11 +59,11 @@
     <div class="big">Slalom Manual Control</div>
     <label>Dynamics:
       <select id="system">
-        <option value="integrator">Integrator only</option>
+        <option value="integrator">Integrator</option>
         <option value="lag">Integrator + 1st order </option>
         <option value="second">Integrator + 2nd order resonance</option>
         <option value="delay"> Integrator + 1st order + delay </option>
-        <option value="non_min_phase">Integrator + Non-min phase</option>
+        <option value="non_min_phase">Integrator + RHPL zero</option>
       </select>
     </label>
     <button id="reset">Reset</button>
@@ -103,7 +103,7 @@
       <div class="hint" style="margin-top:8px;">
         Controls: <span class="kbd">←</span>/<span class="kbd">→</span> (or <span class="kbd">A</span>/<span class="kbd">D</span>) steers,
         <span class="kbd">Space</span> sets u=0. Slider works on mobile.
-        <br/>Green flag → pass on the <b>left</b>. Red flag → pass on the <b>right</b>.
+        <br/>Green  and Red poles → pass on the flag side. Beware of wind shifts</b>. 
       </div>
     </div>
 
@@ -146,10 +146,12 @@
     { y:  300, x: -0.30, side: "green" },
     { y:  540, x:  0.35, side: "red"   },
     { y:  545, x:  0.48, side: "green"   },
-    { y:  780, x:  0.10, side: "green" },
-    { y: 1020, x: -0.45, side: "red"   },
-    { y: 1260, x:  0.50, side: "green" },
-    { y: 1500, x:  0.05, side: "red"   },
+    { y:  780, x:  0.10, side: "red" },
+    { y:  782, x:  0.23, side: "green" },
+    { y: 1020, x: -0.45, side: "green"   },
+    { y: 1260, x:  0.50, side: "red" },
+    { y: 1500, x:  0.10, side: "red"   },
+    { y: 1502, x:  0.23, side: "green"   },
     { y: 1740, x: -0.20, side: "green" },
     { y: 1980, x:  0.25, side: "red"   },
     { y: 2220, x: -0.55, side: "green" },
@@ -365,7 +367,7 @@
   let wAP = 0;    // all-pass internal state for (1 - s*tau)/(1 + s*tau)
 
   // delay on u
-  const delaySec = 0.1;  // seconds of delay (tune this to make it challenging but not impossible)
+  const delaySec = 0.5;  // seconds of delay (tune this to make it challenging but not impossible)
   const delaySteps = Math.max(1, Math.floor(delaySec/dt));
   let uBuf = new Array(delaySteps).fill(0);
 
@@ -395,7 +397,7 @@
       x += dt * y;
     }
     else if (kind === "delay") {
-      const tau = 0.6, K = 120;
+      const tau = 0.5, K = 120;
       uBuf.push(uCmd);
       const uDelayed = uBuf.shift();
       v += dt * (1/tau)*(-v + K*uDelayed);
@@ -404,12 +406,10 @@
     else if (kind === "non_min_phase") {
       // Non-minimum-phase integrator:
       // X/U = K/s * (1 - s*tau)/(1 + s*tau)
-      const tau = 0.3;   // tune
-      const K = 100;      // tune (matches your other K scales)
+      const tau = 0.3;   
+      const K = 120;     
       wAP += dt * (-(1/tau) * wAP + (1/tau) * uCmd);
-      // all-pass output: y/u = (1 - s*tau)/(1 + s*tau)
-      const yAP = (-uCmd + 2 * wAP); // add gust if you want
-      // integrator: x' = K * yAP
+      const yAP = (-uCmd + 2 * wAP); 
       x += dt * (K * yAP);
     }
   }
@@ -706,7 +706,7 @@
         vHoriz = (x - (tick.prevX ?? x)) / dt;
       }
 
-      const reduction = 1 - 0.4 * Math.abs(vHoriz / MAX_HORIZONTAL_SPEED);
+      const reduction = 1 - 0.5 * Math.abs(vHoriz / MAX_HORIZONTAL_SPEED);
       const downhillSpeed = speedMax * clamp(reduction, 0.05, 1);
 
       s += downhillSpeed * dt;
