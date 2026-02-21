@@ -334,6 +334,42 @@
     } catch (_) {}
   }
 
+  // --- Low-health heartbeat ---
+  const HEARTBEAT_HEALTH_THRESHOLD = 0.35;
+  let nextHeartbeatT = 0; // seconds (uses simTime)
+
+  function playHeartbeat(intensity01) {
+    try {
+      ensureAudio();
+      if (audioCtx.state !== "running") return;
+
+      const t0 = audioCtx.currentTime;
+      const dur = 0.12;
+
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(75, t0);
+      osc.frequency.exponentialRampToValueAtTime(45, t0 + dur);
+
+      const g = audioCtx.createGain();
+      const peak = 0.04 + 0.16 * intensity01; // louder as health drops
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      osc.connect(g);
+      g.connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + dur);
+    } catch (_) {}
+  }
+
+  function heartbeatPeriodSeconds() {
+    // Faster when health is lower: ~1.1s at threshold -> ~0.45s near 0
+    const h = clamp(health, 0, 1);
+    const x = clamp((HEARTBEAT_HEALTH_THRESHOLD - h) / HEARTBEAT_HEALTH_THRESHOLD, 0, 1);
+    return 1.10 - 0.9 * x * x;
+  }
 
 
   let windAnnounceTimer = null;
@@ -673,6 +709,7 @@
     gateIndex = 0;
     score = 0;
     health = 1.0;
+    nextHeartbeatT = 0;
 
     // wind reset
     simTime = 0;
@@ -793,6 +830,18 @@
          // IMPORTANT: reset track history & sampling reference so new tracks get recorded
           skiTrack = [];
           lastTrackSampleS = 0;
+        }
+      }
+
+      // heartbeat when health is low
+      if (health > 0 && health < HEARTBEAT_HEALTH_THRESHOLD) {
+        const h = clamp(health, 0, 1);
+        const x = clamp((HEARTBEAT_HEALTH_THRESHOLD - h) / HEARTBEAT_HEALTH_THRESHOLD, 0, 1);
+        const curved = x * x;   // same nonlinear mapping
+
+        if (simTime >= nextHeartbeatT) {
+          playHeartbeat(curved);
+          nextHeartbeatT = simTime + heartbeatPeriodSeconds();
         }
       }
 
