@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Slalom Manual Control (Track Authored)</title>
+  <style>
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#08101d; color:#e8eefc; }
+    header { padding: 12px 16px; display:flex; gap:12px; align-items:center; border-bottom:1px solid #1c2433; background:#0b1324; position:sticky; top:0; z-index:10; flex-wrap:wrap; }
+    select, button, input[type="range"] { background:#121a2a; color:#e8eefc; border:1px solid #26324a; border-radius:10px; padding:8px 10px; }
+    button { cursor:pointer; }
+    main { padding: 12px; display:grid; grid-template-columns: 1.2fr 0.8fr; gap:12px; }
+    .card { background:#0f1626; border:1px solid #1c2433; border-radius:16px; padding:12px; box-shadow: 0 10px 20px rgba(0,0,0,.25); }
+    canvas { width:100%; height:560px; background:#07101c; border-radius:12px; border:1px solid #1c2433; display:block; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+    .stat { padding:8px 10px; border-radius:12px; background:#0b0f17; border:1px solid #1c2433; }
+    .hint { color:#a9b7d3; font-size: 13px; line-height: 1.35; }
+    .big { font-size:18px; font-weight:650; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#111a2b; border:1px solid #26324a; padding:2px 6px; border-radius:8px; }
+    .bar { height:10px; background:#111a2b; border:1px solid #26324a; border-radius:999px; overflow:hidden; }
+    .bar > div { height:100%; width:100%; background:#4da3ff; }
+    code { background:#0b0f17; border:1px solid #1c2433; padding:2px 6px; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="big">Slalom Manual Control</div>
+    <label>Dynamics:
+      <select id="system">
+        <option value="integrator">Integrator only</option>
+        <option value="lag">Integrator + 1st order </option>
+        <option value="second">Integrator + 2nd order resonance</option>
+        <option value="delay"> Integrator + 1st order + delay </option>
+        <option value="non_min_phase">Integrator + Non-min phase</option>
+      </select>
+    </label>
+    <button id="reset">Reset</button>
+    <button id="pause">Pause</button>
+    <label>Steer u:
+      <input id="uSlider" type="range" min="-1" max="1" step="0.01" value="0" style="width:220px"/>
+    </label>
+    <label>Downhill speed:
+      <input id="speedUI" type="range" min="10" max="200" step="10" value="20" style="width:220px"/>
+    </label>
+  </header>
+
+  <main>
+    <div class="card">
+      <canvas id="scene" width="900" height="900"></canvas>
+      <div class="row">
+        <div class="stat">x: <span id="xVal">0.00</span></div>
+        <div class="stat">u: <span id="uVal">0.00</span></div>
+        <div class="stat">Gate #: <span id="gateVal">0</span></div>
+        <div class="stat">Score: <span id="scoreVal">0</span></div>
+      </div>
+      <div class="hint" style="margin-top:8px;">
+        Controls: <span class="kbd">←</span>/<span class="kbd">→</span> (or <span class="kbd">A</span>/<span class="kbd">D</span>) steers,
+        <span class="kbd">Space</span> sets u=0. Slider works on mobile.
+        <br/>Green flag → pass on the <b>left</b>. Red flag → pass on the <b>right</b>.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="big">Developer: author the track</div>
+      <p class="hint">
+        Edit the <code>TRACK</code> array in the code.
+        Each gate is <code>{ y: number, x: number, side: "green"|"red" }</code> where:
+        <br/>• <code>y</code> is distance along the hill (in pixels of “course progress”)
+        <br/>• <code>x</code> is lateral offset (normalized −1..+1 across the slope)
+      </p>
+
+      <div class="big" style="margin-top:12px;">Health</div>
+      <div class="bar"><div id="healthFill"></div></div>
+      <p class="hint" id="sysHint" style="margin-top:10px;"></p>
+
+      <div class="big" style="margin-top:12px;">Teaching knobs</div>
+      <div class="hint">Wind / disturbance</div>
+      <input id="wind" type="range" min="0" max="0.6" step="0.01" value="0.10" style="width:100%"/>
+    </div>
+  </main>
+
+<script>
+(() => {
+  // =========================
+  // 1) DEVELOPER SETTINGS
+  // =========================
+
+  // Downhill speed in pixels per second (course scroll rate).
+  // You can also override it live with the UI slider.
+  //const DOWNHILL_SPEED = 20;
+
+  const DOWNHILL_SPEED = 60;
+  const MAX_HORIZONTAL_SPEED = 100; // tune to match your dynamics scale
+
+  // Where the skier sits (near TOP of screen as requested)
+  const SKIER_Y_FRAC = 0.12; // 0=top, 1=bottom
+
+  // Skier size scale (smaller than before)
+  const SKIER_SCALE = 0.4;
+
+  // Track definition:
+  // y = distance down the hill (increasing with time)
+  // x = normalized lateral position in [-1, +1]
+  // side: green => pass LEFT of pole, red => pass RIGHT of pole
+  const TRACK = [
+    { y:  300, x: -0.30, side: "green" },
+    { y:  540, x:  0.35, side: "red"   },
+    { y:  545, x:  0.48, side: "green"   },
+    { y:  780, x:  0.10, side: "green" },
+    { y: 1020, x: -0.45, side: "red"   },
+    { y: 1260, x:  0.50, side: "green" },
+    { y: 1500, x:  0.05, side: "red"   },
+    { y: 1740, x: -0.20, side: "green" },
+    { y: 1980, x:  0.25, side: "red"   },
+    { y: 2220, x: -0.55, side: "green" },
+    { y: 2460, x:  0.55, side: "red"   },
+  ];
+
+  // =========================
+  // 2) UI refs
+  // =========================
+  const canvas = document.getElementById("scene");
+  const ctx = canvas.getContext("2d");
+  const systemSel = document.getElementById("system");
+  const resetBtn = document.getElementById("reset");
+  const pauseBtn = document.getElementById("pause");
+  const uSlider = document.getElementById("uSlider");
+  const speedUI = document.getElementById("speedUI");
+  const windSlider = document.getElementById("wind");
+
+  const xVal = document.getElementById("xVal");
+  const uVal = document.getElementById("uVal");
+  const gateVal = document.getElementById("gateVal");
+  const scoreVal = document.getElementById("scoreVal");
+  const healthFill = document.getElementById("healthFill");
+  const sysHint = document.getElementById("sysHint");
+
+  // =========================
+  // 3) Helpers
+  // =========================
+  const dt = 1/60;
+  const W = canvas.width, H = canvas.height;
+  const skierY = H * SKIER_Y_FRAC;
+
+  function clamp(a, lo, hi){ return Math.max(lo, Math.min(hi, a)); }
+  function randn() {
+    let u1 = Math.random() || 1e-9, u2 = Math.random();
+    return Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
+  }
+
+  function systemDescription(kind){
+    switch(kind){
+      case "lag": return "Lag: steering feels heavy/sluggish";
+      case "integrator": return "Integrator";
+      case "second": return "Underdamped: oscillatory steering";
+      case "delay": return "Integrator with delay";
+      case "non_min_phase": return "Non-minimum phase";
+    }
+  }
+
+  // =========================
+  // 4) Dynamics (lateral x(t))
+  // =========================
+  let x = 0;      // pixels (centered)
+  let v = 0;      // pixels/s
+  let x2 = 0;     // second-order velocity
+  let u = 0;
+  let y = 0;      // 2nd-order block output
+  let ydot = 0;   // derivative of y
+  let wAP = 0;    // all-pass internal state for (1 - s*tau)/(1 + s*tau)
+
+  // delay on u
+  const delaySec = 0.1;  // seconds of delay (tune this to make it challenging but not impossible)
+  const delaySteps = Math.max(1, Math.floor(delaySec/dt));
+  let uBuf = new Array(delaySteps).fill(0);
+
+  // --- Ski tracks (history) ---
+  const SKI_HALF_GAP = 10 * SKIER_SCALE;   // half distance between skis (px)
+  const TRACK_SAMPLE_DS = 8;               // sample every ~8 px of downhill motion
+  const TRACK_MAX_POINTS = 2500;           // hard cap for performance
+  let skiTrack = [];                       // array of { s: number, x: number }
+  let lastTrackSampleS = 0;
+
+  function stepDynamics(kind, uCmd){
+    const wind = parseFloat(windSlider.value);
+    const gust = wind * randn();
+
+    if (kind === "lag") {
+      const tau = 0.5, K = 120;
+      v += dt * (1/tau)*(-v + K*uCmd + 0*gust);   // no gust for lag (optional, to isolate effect)
+      x += dt * v;
+    }
+    else if (kind === "integrator") {
+      const K = 120;
+      x += dt * (K*uCmd + 0*gust);
+    }
+    else if (kind === "second") {      // 2nd-order block: y'' + 2ζωn y' + ωn^2 y = K ωn^2 u
+      const wn = 2, zeta = 0.05, K = 120;
+      const yddot = -2*zeta*wn*ydot - wn*wn*y + (K*wn*wn)*uCmd + 0*gust;
+      ydot += dt * yddot;
+      y    += dt * ydot;
+      x += dt * y;
+    }
+    else if (kind === "delay") {
+      const tau = 0.6, K = 120;
+      uBuf.push(uCmd);
+      const uDelayed = uBuf.shift();
+      v += dt * (1/tau)*(-v + K*uDelayed + 0*gust);
+      x += dt * v;
+    }
+    else if (kind === "non_min_phase") {
+      // Non-minimum-phase integrator:
+      // X/U = K/s * (1 - s*tau)/(1 + s*tau)
+      const tau = 0.5;   // tune
+      const K = 100;      // tune (matches your other K scales)
+      wAP += dt * (-(1/tau) * wAP + (1/tau) * uCmd);
+      // all-pass output: y/u = (1 - s*tau)/(1 + s*tau)
+      const yAP = (-uCmd + 2 * wAP) + 0 * gust; // add gust if you want
+      // integrator: x' = K * yAP
+      x += dt * (K * yAP);
+    }
+  }
+
+
+  // =========================
+  // 5) Track projection & gate checks
+  // =========================
+  // We keep a "course progress" variable s(t) (pixels of distance along hill).
+  // Each gate has a fixed s = TRACK[i].y.
+  // On screen, gate's y-screen position is:
+  //   y_screen = skierY + (gateS - currentS)
+  // So as currentS increases, gates move upward (y decreases).
+  let s = 0;             // course progress
+  let gateIndex = 0;     // next gate to check
+  let score = 0;
+  let health = 1.0;
+  let paused = false;
+
+  function gateXpixels(xNorm){
+    // xNorm in [-1,1] maps to corridor width
+    const corridor = W * 0.43;
+    return xNorm * corridor;
+  }
+
+  function currentSpeed(){
+    // UI overrides developer constant
+    return parseFloat(speedUI.value) || DOWNHILL_SPEED;
+  }
+
+  function checkGate(g){
+    const margin = 10; // pixels away from pole (tolerance)
+    const poleX = gateXpixels(g.x);
+    const ok = (g.side === "green") ? (x < poleX - margin) : (x > poleX + margin);
+
+    if (ok){
+      score += 120;
+      health = clamp(health + 0.06, 0, 1);
+    } else {
+      score -= 200;
+      health = clamp(health - 0.18, 0, 1);
+    }
+  }
+
+  // =========================
+  // 6) Input
+  // =========================
+  let keyLeft=false, keyRight=false;
+  function applyKeys(){
+    const rate = 2.0;
+    if (keyLeft) u -= rate*dt;
+    if (keyRight) u += rate*dt;
+    u = clamp(u, -1, 1);
+    uSlider.value = u.toFixed(2);
+  }
+  window.addEventListener("keydown", (ev) => {
+    const k = ev.key.toLowerCase();
+    if (ev.key === "ArrowLeft" || k === "a") keyLeft = true;
+    if (ev.key === "ArrowRight" || k === "d") keyRight = true;
+    if (ev.key === " ") { u = 0; uSlider.value = "0"; }
+  });
+  window.addEventListener("keyup", (ev) => {
+    const k = ev.key.toLowerCase();
+    if (ev.key === "ArrowLeft" || k === "a") keyLeft = false;
+    if (ev.key === "ArrowRight" || k === "d") keyRight = false;
+  });
+  uSlider.addEventListener("input", () => { u = parseFloat(uSlider.value); });
+
+  // =========================
+  // 7) Drawing
+  // =========================
+  function drawBackground(){
+    ctx.fillStyle = "#07101c";
+    ctx.fillRect(0,0,W,H);
+
+    // boundaries
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = "#a9b7d3";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(W*0.20, 0); ctx.lineTo(W*0.06, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(W*0.80, 0); ctx.lineTo(W*0.94, H); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGate(g){
+    const xPole = W/2 + gateXpixels(g.x);
+    const yPole = skierY + (g.y - s);
+
+    // only draw if visible-ish
+    if (yPole < -120 || yPole > H + 120) return;
+
+    // pole
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = (g.side === "green") ? "#2bd46f" : "#ff4d4d";
+    ctx.beginPath();
+    ctx.moveTo(xPole, yPole - 14);
+    ctx.lineTo(xPole, yPole + 14);
+    ctx.stroke();
+
+    // flag
+    ctx.fillStyle = (g.side === "green") ? "#2bd46f" : "#ff4d4d";
+    ctx.beginPath();
+    if (g.side === "green") {
+      ctx.moveTo(xPole, yPole - 22);
+      ctx.lineTo(xPole - 10, yPole - 10);
+      ctx.lineTo(xPole, yPole + 2);
+    } else {
+      ctx.moveTo(xPole, yPole - 22);
+      ctx.lineTo(xPole + 10, yPole - 10);
+      ctx.lineTo(xPole, yPole + 2);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // roundRect fallback
+  if (!CanvasRenderingContext2D.prototype.roundRect){
+    CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+      r = Math.min(r, w/2, h/2);
+      this.beginPath();
+      this.moveTo(x+r, y);
+      this.arcTo(x+w, y, x+w, y+h, r);
+      this.arcTo(x+w, y+h, x, y+h, r);
+      this.arcTo(x, y+h, x, y, r);
+      this.arcTo(x, y, x+w, y, r);
+      this.closePath();
+      return this;
+    }
+  }
+
+  function drawSkier(){
+    const sx = W/2 + x;
+    const sy = skierY;
+
+    const scale = SKIER_SCALE;
+
+    // shadow
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(sx, sy + 22*scale, 22*scale, 8*scale, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // skis
+    ctx.strokeStyle = "#e8eefc";
+    ctx.lineWidth = 4*scale;
+    ctx.beginPath();
+    ctx.moveTo(sx - 14*scale, sy + 14*scale);
+    ctx.lineTo(sx - 26*scale, sy + 44*scale);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(sx + 14*scale, sy + 14*scale);
+    ctx.lineTo(sx + 26*scale, sy + 44*scale);
+    ctx.stroke();
+
+    // body
+    ctx.fillStyle = "#4da3ff";
+    ctx.beginPath();
+    ctx.roundRect(sx - 11*scale, sy - 16*scale, 22*scale, 36*scale, 9*scale);
+    ctx.fill();
+
+    // helmet
+    ctx.fillStyle = "#e8eefc";
+    ctx.beginPath();
+    ctx.arc(sx, sy - 24*scale, 8*scale, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  function drawHUD(){
+    const xNorm = x / (W*0.43);
+    xVal.textContent = xNorm.toFixed(2);
+    uVal.textContent = u.toFixed(2);
+    gateVal.textContent = gateIndex.toString();
+    scoreVal.textContent = Math.round(score).toString();
+    healthFill.style.width = `${Math.round(health*100)}%`;
+  }
+
+  function drawSkiTracks(){
+    if (skiTrack.length < 2) return;
+
+    // draw two polylines: left ski and right ski
+    ctx.globalAlpha = 0.28;
+    ctx.strokeStyle = "#e8eefc";
+    ctx.lineWidth = 2;
+
+    // Left ski
+    ctx.beginPath();
+    for (let i = 0; i < skiTrack.length; i++){
+      const p = skiTrack[i];
+      const yScreen = skierY + (p.s - s);
+      if (i === 0) ctx.moveTo(W/2 + (p.x - SKI_HALF_GAP), yScreen);
+      else ctx.lineTo(W/2 + (p.x - SKI_HALF_GAP), yScreen);
+    }
+    ctx.stroke();
+
+    // Right ski
+    ctx.beginPath();
+    for (let i = 0; i < skiTrack.length; i++){
+      const p = skiTrack[i];
+      const yScreen = skierY + (p.s - s);
+      if (i === 0) ctx.moveTo(W/2 + (p.x + SKI_HALF_GAP), yScreen);
+      else ctx.lineTo(W/2 + (p.x + SKI_HALF_GAP), yScreen);
+    }
+    ctx.stroke();
+
+    ctx.globalAlpha = 1;
+  }
+
+  // =========================
+  // 8) Reset & loop
+  // =========================
+  function resetAll(){
+    s = 0;
+    gateIndex = 0;
+    score = 0;
+    health = 1.0;
+
+    x = 0; v = 0; x2 = 0;
+    y = 0; ydot = 0;
+    u = 0; uSlider.value = "0";
+    uBuf = new Array(delaySteps).fill(0);
+
+    skiTrack = [];
+    lastTrackSampleS = 0;
+
+    wAP = 0;
+
+    // initialize UI speed to developer constant (so both match on start)
+    speedUI.value = String(DOWNHILL_SPEED);
+
+    sysHint.textContent = systemDescription(systemSel.value);
+  }
+
+  function tick(){
+    if (!paused){
+      applyKeys();
+
+      // dynamics
+      stepDynamics(systemSel.value, u);
+
+      // corridor bound
+      const xLim = W*0.43;
+      x = clamp(x, -xLim, xLim);
+
+      // advance course progress (downhill depends on horizontal speed)
+      const speedMax = currentSpeed();
+
+      // estimate horizontal speed (v exists in lag/delay, but ensure generic)
+      let vHoriz = v;
+
+      // for integrator model, v is not used → approximate from last step
+      if (systemSel.value === "integrator") {
+        // finite difference estimate
+        vHoriz = (x - (tick.prevX ?? x)) / dt;
+      }
+
+      // for second-order model, x2 is velocity
+      if (systemSel.value === "second") {
+        vHoriz = x2;
+      }
+
+      // Non-minimum phase can be tricky to estimate speed from state → use finite difference
+      if (systemSel.value === "non_min_phase") {
+        vHoriz = (x - (tick.prevX ?? x)) / dt;
+      }
+
+      const reduction = 1 - 0.4 * Math.abs(vHoriz / MAX_HORIZONTAL_SPEED);
+      const downhillSpeed = speedMax * clamp(reduction, 0.05, 1);
+
+      s += downhillSpeed * dt;
+
+      // --- record ski track points (downsample by downhill distance) ---
+      if ((s - lastTrackSampleS) >= TRACK_SAMPLE_DS) {
+        skiTrack.push({ s, x });
+        lastTrackSampleS = s;
+      }
+
+      // --- cull old points that are far above the screen (and cap length) ---
+      // Keep points whose screen y is not too far above the top:
+      // yScreen = skierY + (p.s - s)  -> keep if yScreen > -120
+      while (skiTrack.length && (skierY + (skiTrack[0].s - s)) < -120) {
+        skiTrack.shift();
+      }
+      if (skiTrack.length > TRACK_MAX_POINTS) {
+        skiTrack.splice(0, skiTrack.length - TRACK_MAX_POINTS);
+      }
+
+      tick.prevX = x;
+
+
+      // gate checking: when gate reaches skierY => its y_screen <= skierY
+      // i.e. (g.y - s) <= 0  ->  s >= g.y
+      while (gateIndex < TRACK.length && s >= TRACK[gateIndex].y){
+        checkGate(TRACK[gateIndex]);
+        gateIndex += 1;
+
+        if (gateIndex >= TRACK.length){
+          // Loop: restart the course and also restart ski tracks sampling
+          s = 0;
+          gateIndex = 0;
+
+         // IMPORTANT: reset track history & sampling reference so new tracks get recorded
+          skiTrack = [];
+          lastTrackSampleS = 0;
+        }
+      }
+
+      // render
+      drawBackground();
+      drawSkiTracks();
+      // draw upcoming gates only (all gates whose y_screen > -some margin)
+      for (let i=0;i<TRACK.length;i++){
+        // draw a few ahead & behind to keep it cheap
+        const yScreen = skierY + (TRACK[i].y - s);
+        if (yScreen > -160 && yScreen < H + 160) drawGate(TRACK[i]);
+      }
+      drawSkier();
+      drawHUD();
+
+      if (health <= 0){
+        paused = true;
+        pauseBtn.textContent = "Resume";
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // UI events
+  resetBtn.addEventListener("click", resetAll);
+  pauseBtn.addEventListener("click", () => {
+    paused = !paused;
+    pauseBtn.textContent = paused ? "Resume" : "Pause";
+  });
+  systemSel.addEventListener("change", () => { sysHint.textContent = systemDescription(systemSel.value); resetAll(); });
+
+  // init
+  resetAll();
+  tick();
+})();
+</script>
+</body>
+</html>
