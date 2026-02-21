@@ -64,6 +64,65 @@
       padding: 10px 12px;
       backdrop-filter: blur(6px);
     }
+
+    /* Subtle corner HUD box */
+    .hudBox{
+      position:absolute;
+      bottom:18px;
+      right:12px;
+      z-index:20;
+      max-width: 320px;
+      padding:10px 12px;
+      border-radius:10px;
+      background: rgba(10,12,16,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(4px);
+      color: rgba(255,255,255,0.92);
+      font: 13px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      pointer-events:none; /* won’t steal clicks */
+    }
+
+    .hudTitle{
+      font-weight: 650;
+      letter-spacing: 0.2px;
+      margin-bottom: 6px;
+      opacity: 0.95;
+    }
+
+    .hudMath{
+      opacity: 0.92;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    .frac{
+      display:inline-flex;
+      flex-direction:column;
+      align-items:stretch;   /* important so the line spans the fraction width */
+      vertical-align:middle;
+      margin: 0 2px;
+    }
+
+    .frac .num, .frac .den{
+      padding: 0 2px;
+      white-space:nowrap;
+      text-align:center;
+    }
+
+    .frac .fracbar{
+      width:100%;
+      border-top: 1px solid #fff; /* simple white line */
+      opacity: 0.9;
+      margin: 1px 0;
+    }
+
+    /* Nice-ish subscripts/superscripts */
+    sub{ font-size: 0.8em; vertical-align: -0.2em; }
+    sup{ font-size: 0.8em; vertical-align: 0.35em; }
+
+    /* Optional: keep it from feeling “loud” on small screens */
+    @media (max-width: 520px){
+      .hudBox{ max-width: 240px; font-size: 12px; }
+    }
   </style>
 </head>
 <body>
@@ -93,6 +152,14 @@
         <option value="1.0">Black</option>
       </select>
     </label>
+
+    <label>Wind:
+      <select id="windLevel" style="width:140px">
+        <option value="0.05" selected>Breeze</option>
+        <option value="0.5">Windy</option>
+        <option value="1.0">Storm</option>
+      </select>
+    </label>
   </header>
 
   <main>
@@ -100,7 +167,13 @@
       <div class="canvasWrap">
         <canvas id="scene" width="900" height="900"></canvas>
         <div id="windAnnounce" class="windAnnounce"></div>
+        <!-- Plant model overlay -->
+        <div id="plantOverlay" class="hudBox">
+          <div id="plantName" class="hudTitle">Plant</div>
+          <div id="plantTF" class="hudMath"></div>
+        </div>
       </div>
+
       <div class="row">
         <div class="stat windMeter">
           Wind: <span class="num windNum" id="windVal">0</span> px/s
@@ -122,17 +195,9 @@
     </div>
 
     <div class="card">
-
       <div class="big" style="margin-top:12px;">Health</div>
       <div class="bar"><div id="healthFill"></div></div>
       <p class="hint" id="sysHint" style="margin-top:10px;"></p>
-
-      <div class="hint">Wind</div>
-      <select id="windLevel" style="width:100%">
-        <option value="0.05" selected>Breeze</option>
-        <option value="0.4">Windy</option>
-        <option value="1.0">Storm</option>
-      </select>
     </div>
   </main>
 
@@ -352,7 +417,7 @@
       osc.frequency.exponentialRampToValueAtTime(45, t0 + dur);
 
       const g = audioCtx.createGain();
-      const peak = 0.04 + 0.16 * intensity01; // louder as health drops
+      const peak = 0.04 + 0.26 * intensity01; // louder as health drops
       g.gain.setValueAtTime(0.0001, t0);
       g.gain.exponentialRampToValueAtTime(peak, t0 + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
@@ -368,7 +433,7 @@
     // Faster when health is lower: ~1.1s at threshold -> ~0.45s near 0
     const h = clamp(health, 0, 1);
     const x = clamp((HEARTBEAT_HEALTH_THRESHOLD - h) / HEARTBEAT_HEALTH_THRESHOLD, 0, 1);
-    return 1.10 - 0.9 * x * x;
+    return 1.10 - 1 * x;
   }
 
 
@@ -406,6 +471,7 @@
       case "non_min_phase": return "Non-minimum phase";
     }
   }
+
   function slopeBoundsAtY(y){
     const t = y / H; // 0 at top, 1 at bottom
     const left  = (W*0.20) + t * ((W*0.06) - (W*0.20));
@@ -413,6 +479,64 @@
     return { left, right };  
   }
   
+  // --- Plant overlay: name + transfer function (lightweight HTML) ---
+  const PLANT_OVERLAY = {
+    integrator: {
+      name: "Integrator",
+      tf: `G(s) = <span class="frac">
+            <span class="num">K</span>
+            <span class="fracbar"></span>
+            <span class="den">s</span>
+          </span>`
+    },
+    lag: {
+      name: "Integrator + 1st order",
+      tf: `G(s) = <span class="frac">
+            <span class="num">K</span>
+            <span class="fracbar"></span>
+            <span class="den">s(1 + s&tau;)</span> 
+          </span>`
+    },
+    second: {
+      name: "Integrator + 2nd order resonance",
+      tf: `G(s) = <span class="frac">
+            <span class="num">K</span>
+            <span class="fracbar"></span>
+            <span class="den">
+              s(1 + 2&zeta;<span class="frac"><span class="num">s</span><span class="fracbar"></span><span class="den">&omega;<sub>n</sub></span></span>
+              + (<span class="frac"><span class="num">s</span><span class="fracbar"></span><span class="den">&omega;<sub>n</sub></span></span>)<sup>2</sup>)
+            </span>
+          </span>`
+    },
+    delay: {
+      name: "Time delay system",
+      tf: `G(s) = e<sup>-sL</sup> &nbsp;
+          <span class="frac">
+            <span class="num">K</span>
+            <span class="fracbar"></span>
+            <span class="den">1 + s&tau;</span>
+          </span>`
+    },
+    non_min_phase: {
+      name: "Integrator + RHP zero",
+      tf: `G(s) = K
+          <span class="frac">
+            <span class="num">1 - s&tau;</span>
+            <span class="fracbar"></span>
+            <span class="den">s(1 + s&tau;)</span>
+          </span>`
+    }
+  };
+
+  function updatePlantOverlay() {
+    const key = systemSel.value;
+    const info = PLANT_OVERLAY[key] || { name: "Plant", tf: "" };
+
+    const nameEl = document.getElementById("plantName");
+    const tfEl   = document.getElementById("plantTF");
+    if (nameEl) nameEl.textContent = info.name;
+    if (tfEl) tfEl.innerHTML = info.tf;
+  }
 
   // =========================
   // 4) Dynamics (lateral x(t))
@@ -873,11 +997,15 @@
     paused = !paused;
     pauseBtn.textContent = paused ? "Resume" : "Pause";
   });
-  systemSel.addEventListener("change", () => { sysHint.textContent = systemDescription(systemSel.value); resetAll(); });
-
+  systemSel.addEventListener("change", () => {
+    sysHint.textContent = systemDescription(systemSel.value);
+    updatePlantOverlay();
+    resetAll();
+  });
   // init
   resetAll();
   updateSlopeSelectColor();
+  updatePlantOverlay();
   tick();
 })();
 </script>
