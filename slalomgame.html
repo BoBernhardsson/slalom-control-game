@@ -20,6 +20,32 @@
     .bar { height:10px; background:#111a2b; border:1px solid #26324a; border-radius:999px; overflow:hidden; }
     .bar > div { height:100%; width:100%; background:#4da3ff; }
     code { background:#0b0f17; border:1px solid #1c2433; padding:2px 6px; border-radius:8px; }
+    /* Wind UI */
+    .canvasWrap { position: relative; }
+    .windAnnounce {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(11, 15, 23, 0.75);
+      border: 1px solid #26324a;
+      color: #e8eefc;
+      font-size: 13px;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity 250ms ease, transform 250ms ease;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+    }
+    .windAnnounce.show { opacity: 1; transform: translateY(0); }
+
+    .windMeter { display:flex; align-items:center; gap:10px; }
+    .windBar { position: relative; width: 140px; height: 10px; border-radius: 999px; background:#111a2b; border:1px solid #26324a; overflow:hidden; }
+    .windMid { position:absolute; left:50%; top:-2px; width:2px; height:14px; background:#a9b7d3; opacity:0.55; }
+    .windPos { position:absolute; left:50%; top:0; height:100%; width:0%; background:#4da3ff; }
+    .windNeg { position:absolute; right:50%; top:0; height:100%; width:0%; background:#4da3ff; }
+    .windFlash { box-shadow: 0 0 0 2px rgba(232,238,252,0.35); }
   </style>
 </head>
 <body>
@@ -39,19 +65,34 @@
     <label>Steer u:
       <input id="uSlider" type="range" min="-1" max="1" step="0.01" value="0" style="width:220px"/>
     </label>
-    <label>Downhill speed:
-      <input id="speedUI" type="range" min="10" max="200" step="10" value="20" style="width:220px"/>
+    <label>Slope:
+      <select id="slopeLevel" style="width:160px">
+        <option value="0.25">Green</option>
+        <option value="0.5" selected>Blue</option>
+        <option value="0.75">Red</option>
+        <option value="1.0">Black</option>
+      </select>
     </label>
   </header>
 
   <main>
     <div class="card">
-      <canvas id="scene" width="900" height="900"></canvas>
+      <div class="canvasWrap">
+        <canvas id="scene" width="900" height="900"></canvas>
+        <div id="windAnnounce" class="windAnnounce"></div>
+      </div>
       <div class="row">
-        <div class="stat">x: <span id="xVal">0.00</span></div>
-        <div class="stat">u: <span id="uVal">0.00</span></div>
-        <div class="stat">Gate #: <span id="gateVal">0</span></div>
-        <div class="stat">Score: <span id="scoreVal">0</span></div>
+        <div class="stat windMeter">
+          Wind: <span class="num windNum" id="windVal">0</span> px/s
+          <div id="windBar" class="windBar">
+            <div id="windNeg" class="windNeg"></div>
+            <div id="windPos" class="windPos"></div>
+            <div class="windMid"></div>
+          </div>
+        </div>
+
+        <div class="stat">Gate #: <span class="num" id="gateVal">0</span></div>
+        <div class="stat">Score: <span class="num scoreNum" id="scoreVal">0</span></div>
       </div>
       <div class="hint" style="margin-top:8px;">
         Controls: <span class="kbd">←</span>/<span class="kbd">→</span> (or <span class="kbd">A</span>/<span class="kbd">D</span>) steers,
@@ -61,21 +102,17 @@
     </div>
 
     <div class="card">
-      <div class="big">Developer: author the track</div>
-      <p class="hint">
-        Edit the <code>TRACK</code> array in the code.
-        Each gate is <code>{ y: number, x: number, side: "green"|"red" }</code> where:
-        <br/>• <code>y</code> is distance along the hill (in pixels of “course progress”)
-        <br/>• <code>x</code> is lateral offset (normalized −1..+1 across the slope)
-      </p>
 
       <div class="big" style="margin-top:12px;">Health</div>
       <div class="bar"><div id="healthFill"></div></div>
       <p class="hint" id="sysHint" style="margin-top:10px;"></p>
 
-      <div class="big" style="margin-top:12px;">Teaching knobs</div>
-      <div class="hint">Wind / disturbance</div>
-      <input id="wind" type="range" min="0" max="0.6" step="0.01" value="0.10" style="width:100%"/>
+      <div class="hint">Wind</div>
+      <select id="windLevel" style="width:100%">
+        <option value="0.1" selected>Breeze</option>
+        <option value="0.5">Windy</option>
+        <option value="1.0">Storm</option>
+      </select>
     </div>
   </main>
 
@@ -85,9 +122,6 @@
   // 1) DEVELOPER SETTINGS
   // =========================
 
-  // Downhill speed in pixels per second (course scroll rate).
-  // You can also override it live with the UI slider.
-  //const DOWNHILL_SPEED = 20;
 
   const DOWNHILL_SPEED = 60;
   const MAX_HORIZONTAL_SPEED = 100; // tune to match your dynamics scale
@@ -125,15 +159,20 @@
   const resetBtn = document.getElementById("reset");
   const pauseBtn = document.getElementById("pause");
   const uSlider = document.getElementById("uSlider");
-  const speedUI = document.getElementById("speedUI");
-  const windSlider = document.getElementById("wind");
+  const slopeLevelSel = document.getElementById("slopeLevel");
+  const windLevelSel = document.getElementById("windLevel");
 
-  const xVal = document.getElementById("xVal");
-  const uVal = document.getElementById("uVal");
+  //const xVal = document.getElementById("xVal");
+  //const uVal = document.getElementById("uVal");
   const gateVal = document.getElementById("gateVal");
   const scoreVal = document.getElementById("scoreVal");
   const healthFill = document.getElementById("healthFill");
   const sysHint = document.getElementById("sysHint");
+  const windVal = document.getElementById("windVal");
+  const windBar = document.getElementById("windBar");
+  const windPos = document.getElementById("windPos");
+  const windNeg = document.getElementById("windNeg");
+  const windAnnounce = document.getElementById("windAnnounce");
 
   // =========================
   // 3) Helpers
@@ -141,6 +180,138 @@
   const dt = 1/60;
   const W = canvas.width, H = canvas.height;
   const skierY = H * SKIER_Y_FRAC;
+
+
+  // --- Wind as piecewise-constant velocity bias (px/s), updated every Uniform[10,20] seconds ---
+  const WIND_MIN_DT = 8;          // seconds
+  const WIND_MAX_DT = 15;          // seconds
+  const WIND_VMAX_PXPS = 70;       // max |wind bias| when wind slider = 1.0 (tune)
+  let simTime = 0;                // seconds since reset
+  let windBias = 0;               // px/s (held constant between updates)
+  let nextWindChangeT = 0;        // seconds
+
+
+  // --- Audio: procedural "whoosh" on wind change ---
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  function unlockAudioOnce() {
+    try {
+      ensureAudio();
+      if (audioCtx.state !== "running") audioCtx.resume();
+    } catch (_) {}
+    window.removeEventListener("pointerdown", unlockAudioOnce);
+    window.removeEventListener("keydown", unlockAudioOnce);
+  }
+  window.addEventListener("pointerdown", unlockAudioOnce, { once: true });
+  window.addEventListener("keydown", unlockAudioOnce, { once: true });
+
+  function playWhoosh(intensity01) {
+    try {
+      ensureAudio();
+      if (audioCtx.state !== "running") return; // requires user gesture first
+      const t0 = audioCtx.currentTime;
+      const dur = 0.5;
+      const n = Math.floor(audioCtx.sampleRate * dur);
+      const buf = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1);
+
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.Q.value = 0.9;
+      bp.frequency.setValueAtTime(220, t0);
+      bp.frequency.exponentialRampToValueAtTime(1400, t0 + dur);
+
+      const g = audioCtx.createGain();
+      const peak = 0.02 + 0.14 * Math.max(0, Math.min(1, intensity01));
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(audioCtx.destination);
+      src.start(t0);
+      src.stop(t0 + dur);
+    } catch (_) {}
+  }
+
+  // --- Gate feedback sounds ---
+  function playPositive() {
+    try {
+      ensureAudio();
+      if (audioCtx.state !== "running") return;
+
+      const t0 = audioCtx.currentTime;
+      const dur = 0.18;
+
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(650, t0);
+      osc.frequency.exponentialRampToValueAtTime(1100, t0 + dur);
+
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.07, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      osc.connect(g);
+      g.connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + dur);
+    } catch (_) {}
+  }
+
+  function playNegative() {
+    try {
+      ensureAudio();      
+      if (audioCtx.state !== "running") return;
+
+      const t0 = audioCtx.currentTime;      
+      const dur = 0.28;
+
+      const osc = audioCtx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(400, t0);
+      osc.frequency.exponentialRampToValueAtTime(140, t0 + dur);
+
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.10, t0 + 0.02);      
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      osc.connect(g);
+      g.connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + dur);
+    } catch (_) {}
+  }
+
+
+
+  let windAnnounceTimer = null;
+  function announceWindChange(oldBias, newBias) {
+    const dir = newBias > 0 ? "→" : (newBias < 0 ? "←" : "•");
+    windAnnounce.textContent = `Wind shift ${dir} ${Math.round(newBias)} px/s`;
+    windAnnounce.classList.add("show");
+    windBar.classList.add("windFlash");
+    if (windAnnounceTimer) clearTimeout(windAnnounceTimer);
+    windAnnounceTimer = setTimeout(() => {
+      windAnnounce.classList.remove("show");
+      windBar.classList.remove("windFlash");
+    }, 2500);
+
+    const delta = Math.abs(newBias - oldBias);
+    const windLevel = parseFloat(windLevelSel.value) || 0;
+    const max = Math.max(1, windLevel * WIND_VMAX_PXPS);
+    playWhoosh(Math.min(1, delta / max));
+  }
+
 
   function clamp(a, lo, hi){ return Math.max(lo, Math.min(hi, a)); }
   function randn() {
@@ -152,7 +323,7 @@
     switch(kind){
       case "lag": return "Lag: steering feels heavy/sluggish";
       case "integrator": return "Integrator";
-      case "second": return "Underdamped: oscillatory steering";
+      case "second": return "Oscillatory steering";
       case "delay": return "Integrator with delay";
       case "non_min_phase": return "Non-minimum phase";
     }
@@ -182,21 +353,19 @@
   let lastTrackSampleS = 0;
 
   function stepDynamics(kind, uCmd){
-    const wind = parseFloat(windSlider.value);
-    const gust = wind * randn();
 
     if (kind === "lag") {
       const tau = 0.5, K = 120;
-      v += dt * (1/tau)*(-v + K*uCmd + 0*gust);   // no gust for lag (optional, to isolate effect)
+      v += dt * (1/tau)*(-v + K*uCmd);   // no gust for lag (optional, to isolate effect)
       x += dt * v;
     }
     else if (kind === "integrator") {
       const K = 120;
-      x += dt * (K*uCmd + 0*gust);
+      x += dt * (K*uCmd);
     }
     else if (kind === "second") {      // 2nd-order block: y'' + 2ζωn y' + ωn^2 y = K ωn^2 u
-      const wn = 2, zeta = 0.05, K = 120;
-      const yddot = -2*zeta*wn*ydot - wn*wn*y + (K*wn*wn)*uCmd + 0*gust;
+      const wn = 2, zeta = 0.15, K = 120;
+      const yddot = -2*zeta*wn*ydot - wn*wn*y + (K*wn*wn)*uCmd;
       ydot += dt * yddot;
       y    += dt * ydot;
       x += dt * y;
@@ -205,17 +374,17 @@
       const tau = 0.6, K = 120;
       uBuf.push(uCmd);
       const uDelayed = uBuf.shift();
-      v += dt * (1/tau)*(-v + K*uDelayed + 0*gust);
+      v += dt * (1/tau)*(-v + K*uDelayed);
       x += dt * v;
     }
     else if (kind === "non_min_phase") {
       // Non-minimum-phase integrator:
       // X/U = K/s * (1 - s*tau)/(1 + s*tau)
-      const tau = 0.5;   // tune
+      const tau = 0.3;   // tune
       const K = 100;      // tune (matches your other K scales)
       wAP += dt * (-(1/tau) * wAP + (1/tau) * uCmd);
       // all-pass output: y/u = (1 - s*tau)/(1 + s*tau)
-      const yAP = (-uCmd + 2 * wAP) + 0 * gust; // add gust if you want
+      const yAP = (-uCmd + 2 * wAP); // add gust if you want
       // integrator: x' = K * yAP
       x += dt * (K * yAP);
     }
@@ -243,8 +412,8 @@
   }
 
   function currentSpeed(){
-    // UI overrides developer constant
-    return parseFloat(speedUI.value) || DOWNHILL_SPEED;
+    const factor = parseFloat(slopeLevelSel.value) || 1.0;
+    return DOWNHILL_SPEED * factor;
   }
 
   function checkGate(g){
@@ -255,9 +424,11 @@
     if (ok){
       score += 120;
       health = clamp(health + 0.06, 0, 1);
+      playPositive();
     } else {
       score -= 200;
       health = clamp(health - 0.18, 0, 1);
+      playNegative();
     }
   }
 
@@ -388,12 +559,21 @@
 
   function drawHUD(){
     const xNorm = x / (W*0.43);
-    xVal.textContent = xNorm.toFixed(2);
-    uVal.textContent = u.toFixed(2);
+    //xVal.textContent = xNorm.toFixed(2);
+    //uVal.textContent = u.toFixed(2);
     gateVal.textContent = gateIndex.toString();
     scoreVal.textContent = Math.round(score).toString();
     healthFill.style.width = `${Math.round(health*100)}%`;
-  }
+
+    // wind meter (px/s + bar)
+    windVal.textContent = String(Math.round(windBias));
+    const windLevel = parseFloat(windLevelSel.value) || 0;
+    const max = Math.max(1, windLevel * WIND_VMAX_PXPS);
+    const r = Math.max(-1, Math.min(1, windBias / max)); // normalized to current max
+    const wPct = `${Math.abs(r) * 50}%`; // half-bar is 50%
+    if (r >= 0) { windPos.style.width = wPct; windNeg.style.width = "0%"; }
+    else        { windNeg.style.width = wPct; windPos.style.width = "0%"; }
+   }
 
   function drawSkiTracks(){
     if (skiTrack.length < 2) return;
@@ -435,6 +615,11 @@
     score = 0;
     health = 1.0;
 
+    // wind reset
+    simTime = 0;
+    windBias = 0;
+    nextWindChangeT = (WIND_MIN_DT + Math.random() * (WIND_MAX_DT - WIND_MIN_DT));
+
     x = 0; v = 0; x2 = 0;
     y = 0; ydot = 0;
     u = 0; uSlider.value = "0";
@@ -445,9 +630,6 @@
 
     wAP = 0;
 
-    // initialize UI speed to developer constant (so both match on start)
-    speedUI.value = String(DOWNHILL_SPEED);
-
     sysHint.textContent = systemDescription(systemSel.value);
   }
 
@@ -455,8 +637,23 @@
     if (!paused){
       applyKeys();
 
+      // wind update (piecewise-constant velocity bias)
+      simTime += dt;
+      if (simTime >= nextWindChangeT) {
+        const oldBias = windBias;
+        const windLevel = parseFloat(windLevelSel.value); // scales max bias
+        const amp = windLevel * WIND_VMAX_PXPS;
+        windBias = (Math.random() * 2 - 1) * amp; // Uniform[-amp, +amp] px/s
+        nextWindChangeT = simTime + (WIND_MIN_DT + Math.random() * (WIND_MAX_DT - WIND_MIN_DT));
+        announceWindChange(oldBias, windBias);
+      }
+
+
       // dynamics
       stepDynamics(systemSel.value, u);
+
+      // apply wind post-plant (adds lateral velocity bias)
+      x += dt * windBias;
 
       // corridor bound
       const xLim = W*0.43;
