@@ -46,6 +46,12 @@
     .windPos { position:absolute; left:50%; top:0; height:100%; width:0%; background:#4da3ff; }
     .windNeg { position:absolute; right:50%; top:0; height:100%; width:0%; background:#4da3ff; }
     .windFlash { box-shadow: 0 0 0 2px rgba(232,238,252,0.35); }
+   /* Slope level coloring (colors the selected value) */
+    #slopeLevel { font-weight: 650; }
+    #slopeLevel.level-green { color: #2bd46f; }
+    #slopeLevel.level-blue  { color: #4da3ff; }
+    #slopeLevel.level-red   { color: #ff4d4d; }
+    #slopeLevel.level-black { color: #ebecef; }
   </style>
 </head>
 <body>
@@ -109,8 +115,8 @@
 
       <div class="hint">Wind</div>
       <select id="windLevel" style="width:100%">
-        <option value="0.1" selected>Breeze</option>
-        <option value="0.5">Windy</option>
+        <option value="0.05" selected>Breeze</option>
+        <option value="0.4">Windy</option>
         <option value="1.0">Storm</option>
       </select>
     </div>
@@ -130,7 +136,7 @@
   const SKIER_Y_FRAC = 0.12; // 0=top, 1=bottom
 
   // Skier size scale (smaller than before)
-  const SKIER_SCALE = 0.4;
+  const SKIER_SCALE = 0.3;
 
   // Track definition:
   // y = distance down the hill (increasing with time)
@@ -160,6 +166,22 @@
   const pauseBtn = document.getElementById("pause");
   const uSlider = document.getElementById("uSlider");
   const slopeLevelSel = document.getElementById("slopeLevel");
+  function slopeFactor(){
+    return parseFloat(slopeLevelSel?.value ?? "1.0");
+  }
+
+  function updateSlopeSelectColor() {
+    const v = slopeFactor();
+    slopeLevelSel.classList.remove("level-green","level-blue","level-red","level-black");
+    if (v === 0.25) slopeLevelSel.classList.add("level-green");
+    else if (v === 0.5) slopeLevelSel.classList.add("level-blue");
+    else if (v === 0.75) slopeLevelSel.classList.add("level-red");
+    else slopeLevelSel.classList.add("level-black");
+  }
+
+  slopeLevelSel.addEventListener("change", updateSlopeSelectColor);
+
+
   const windLevelSel = document.getElementById("windLevel");
 
   //const xVal = document.getElementById("xVal");
@@ -174,6 +196,8 @@
   const windNeg = document.getElementById("windNeg");
   const windAnnounce = document.getElementById("windAnnounce");
 
+  
+
   // =========================
   // 3) Helpers
   // =========================
@@ -184,8 +208,8 @@
 
   // --- Wind as piecewise-constant velocity bias (px/s), updated every Uniform[10,20] seconds ---
   const WIND_MIN_DT = 8;          // seconds
-  const WIND_MAX_DT = 15;          // seconds
-  const WIND_VMAX_PXPS = 70;       // max |wind bias| when wind slider = 1.0 (tune)
+  const WIND_MAX_DT = 15;         // seconds
+  const WIND_VMAX_PXPS = 40;      // max |wind bias| when wind slider = 1.0 (tune)
   let simTime = 0;                // seconds since reset
   let windBias = 0;               // px/s (held constant between updates)
   let nextWindChangeT = 0;        // seconds
@@ -364,7 +388,7 @@
       x += dt * (K*uCmd);
     }
     else if (kind === "second") {      // 2nd-order block: y'' + 2ζωn y' + ωn^2 y = K ωn^2 u
-      const wn = 2, zeta = 0.15, K = 120;
+      const wn = 2, zeta = 0.2, K = 120;
       const yddot = -2*zeta*wn*ydot - wn*wn*y + (K*wn*wn)*uCmd;
       ydot += dt * yddot;
       y    += dt * ydot;
@@ -420,17 +444,18 @@
     const margin = 10; // pixels away from pole (tolerance)
     const poleX = gateXpixels(g.x);
     const ok = (g.side === "green") ? (x < poleX - margin) : (x > poleX + margin);
-
+    const m = 0.75 + slopeFactor(); // 1.00 / 1.25 / 1.5 / 1.75
     if (ok){
-      score += 120;
-      health = clamp(health + 0.06, 0, 1);
+      score += 120 * m;
+      health = clamp(health + 0.05, 0, 1);
       playPositive();
     } else {
-      score -= 200;
+      score -= 200 * m;
       health = clamp(health - 0.18, 0, 1);
       playNegative();
     }
   }
+
 
   // =========================
   // 6) Input
@@ -738,7 +763,7 @@
         paused = true;
         pauseBtn.textContent = "Resume";
       }
-    }
+    }const m = slopeFactor(); // 0.25 / 0.5 / 0.75 / 1.0
     requestAnimationFrame(tick);
   }
 
@@ -752,6 +777,7 @@
 
   // init
   resetAll();
+  updateSlopeSelectColor();
   tick();
 })();
 </script>
