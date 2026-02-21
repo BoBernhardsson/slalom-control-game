@@ -56,24 +56,7 @@ Wind acts as a piecewise-constant disturbance that changes randomly.
 - **Slider** — direct control input  
 - **Slope selector** — downhill speed / difficulty  
 - **Wind selector** — disturbance intensity  
-
----
-
-## 🧪 Teaching Use
-
-This simulation is intended for:
-
-- Control Systems (undergraduate or master level)
-- Introduction to dynamical systems
-- Intuition building before formal controller design
-
-Possible exercises:
-
-- Compare integrator vs. lag behavior  
-- Observe oscillations for low damping  
-- Investigate effect of delay  
-- Explore non-minimum phase response  
-- Study disturbance rejection under wind  
+  
 
 ---
 
