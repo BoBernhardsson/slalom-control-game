@@ -3,7 +3,7 @@
 Interactive browser-based slalom skiing simulation for teaching manual control of dynamical systems.
 
 🔗 **Launch the simulation:**  
-https://YOURUSERNAME.github.io/slalom-control-game/
+https://BoBernhardsson.github.io/slalom-control-game/
 
 ---
 
