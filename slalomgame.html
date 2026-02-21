@@ -172,6 +172,10 @@
     { y: 2460, x:  0.55, side: "red"   },
   ];
 
+  // Outside-slope penalty (applied per second while outside)
+  const OUTSIDE_HEALTH_DRAIN_PER_S = 0.01;   // tune
+  const OUTSIDE_SCORE_DRAIN_PER_S  = 10;     // tune (points per second)
+
   // =========================
   // 2) UI refs
   // =========================
@@ -366,6 +370,13 @@
       case "non_min_phase": return "Non-minimum phase";
     }
   }
+  function slopeBoundsAtY(y){
+    const t = y / H; // 0 at top, 1 at bottom
+    const left  = (W*0.20) + t * ((W*0.06) - (W*0.20));
+    const right = (W*0.80) + t * ((W*0.94) - (W*0.80));
+    return { left, right };  
+  }
+  
 
   // =========================
   // 4) Dynamics (lateral x(t))
@@ -695,6 +706,15 @@
       // corridor bound
       const xLim = W*0.43;
       x = clamp(x, -xLim, xLim);
+
+     // penalize if skier is outside the ski-area defined by slope lines
+      const sx = W/2 + x; // skier screen x
+      const b = slopeBoundsAtY(skierY);
+      const outside = (sx < b.left) || (sx > b.right);
+      if (outside) {
+        health = clamp(health - OUTSIDE_HEALTH_DRAIN_PER_S * dt, 0, 1);
+        score -= OUTSIDE_SCORE_DRAIN_PER_S * dt;
+      }
 
       // advance course progress (downhill depends on horizontal speed)
       const speedMax = currentSpeed();
