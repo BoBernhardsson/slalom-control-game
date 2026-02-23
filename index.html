@@ -11,7 +11,35 @@
     button { cursor:pointer; }
     main { padding: 12px; display:grid; grid-template-columns: 1.2fr 0.8fr; gap:12px; }
     .card { background:#0f1626; border:1px solid #1c2433; border-radius:16px; padding:12px; box-shadow: 0 10px 20px rgba(0,0,0,.25); }
-    canvas { width:100%; height:560px; background:#07101c; border-radius:12px; border:1px solid #1c2433; display:block; }
+    
+    /*canvas { width:100%; height:560px; background:#07101c; border-radius:12px; border:1px solid #1c2433; display:block; }*/
+    /* Make left panel canvas scale with available space */
+    .canvasWrap{
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;           /* square playfield */
+      max-height: calc(100vh - 170px); /* leave room for header + padding */
+    }
+
+    /* Canvas fills the wrapper */
+    canvas{
+      width:100%;
+      height:100%;
+      background:#07101c;
+      border-radius:12px;
+      border:1px solid #1c2433;
+      display:block;
+    }
+
+    @media (max-width: 900px){
+      main{
+        grid-template-columns: 1fr;
+      }
+      #uControl{
+        right: 12px;
+        bottom: 12px;
+      }
+    }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
     .stat { padding:8px 10px; border-radius:12px; background:#0b0f17; border:1px solid #1c2433; }
     .hint { color:#a9b7d3; font-size: 13px; line-height: 1.35; }
@@ -286,9 +314,42 @@
   // =========================
   // 3) Helpers
   // =========================
+
+  // --- Embedded wind "whoosh" sound ---
+    const WIND_WHOOSH_DATA_URI = "data:audio/mp3;base64,SUQzBAAAAAAAIlRTU0UAAAAOAAADTGF2ZjYxLjcuMTAwAAAAAAAAAAAAAAD/4zjAAAAAAAAAAAAASW5mbwAAAA8AAAAXAAAHUAAnJycnMTExMTs7Ozs7RERERE5OTk5YWFhYWGJiYmJsbGxsdnZ2dnaAgICAiYmJiZOTk5OTnZ2dnaenp6exsbGxsbu7u7vExMTEzs7Ozs7Y2NjY4uLi4uzs7Ozs9vb29v////8AAAAATGF2YzYxLjE5AAAAAAAAAAAAAAAAJAKgAAAAAAAAB1DAGN6dAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/4xjEAA1AteABTwABpl+/swIYoIJyKCJDV6vV8eAr47AhjI3nOo1ILmlyeCED8Uo3xc1ot51wk4oImX8f47wDB0f/0NB0r2b/4xjEBg3w3rgBj0gAK5KIs5s7+UCcagXYsSjOo+Lz6jro7gK5hCeqYaQb5uv/wBLoEbfMPH1XP/RxilKd/6nwuTYADU2YRTb/4xjECQ5o8u0ZyBgDO7auXjlXto/GEFHBqYsRGum5hC3GyI9QKILFo4d2qX//r7XUi6nm0Hg9Aj4DnQe/QmCXLQAPl8pIwnr/4xjECg7BRukYMkaDyeaXqR11n37rRgMYkDR4kabCHXWgibOxk/A0BCATsb1iCGlNoYXeFi4LEXuFW/fx3aUC3b+AMDnWEHH/4xjECg3BuwG4GYTCfyJKrtS4eVkYnrCQgjhZpoPsna227JKz2bMMFBLR0MRlO7N1fb2tkWx7sg/pgQCe3iQ4kGZ7ouQdREb/4xjEDgypEumgGwZNLezBz+/rbe76WIWHIr0uRQUgABVW60s3i9P88HqnwwMDjGKfJZmApLsAMOCBiwCGlKDuTOppyiyJEP//4xjEFgxpUwW4GEbC9gcAGVZlEgpZyi+qLdHv/wpE+dUVFXdVJTTZWqVAHLsAKgwpGOwwcUvwbW33a9PsIwgdlY/rP/4gKl3/4xjEHwyZLwG4EMROUd0sydxDQqMD5cMONP0vInl+aVUGmzZTq8MENF6U2ZKZSPs4z6UVIn0s8G+fpYU4m2Gnm0Dam+cLImL/4xjEJwwo7txAM8aHGl5SCJZKnkn36rAAbvyMIQvo96z5TscbHREKLCMC5NcUDQntWhr4qM5cX9S257tZ1f4w+O/a8adT1tD/4xjEMQwA+u2gSNYpFOQAB3+EyRMmxoyftyhqcWez7lW5eeaNCQnoPI9RzofDn7VeGOeesi2x5g+QMIKtpZ1IWQJcuAAyEIT=";
+
+
   const dt = 1/60;
-  const W = canvas.width, H = canvas.height;
-  const skierY = H * SKIER_Y_FRAC;
+  let W = 900, H = 900;
+  let skierY = H * SKIER_Y_FRAC;
+
+  function resizeCanvasToDisplaySize(){
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+
+    // Display size in CSS pixels
+    const displayW = Math.max(2, Math.round(rect.width));
+    const displayH = Math.max(2, Math.round(rect.height));
+
+    // Backing store size in device pixels
+    const targetW = Math.round(displayW * dpr);
+    const targetH = Math.round(displayH * dpr);
+
+    // Only resize if needed (important for performance)
+    if (canvas.width !== targetW || canvas.height !== targetH){
+      canvas.width = targetW;
+      canvas.height = targetH;
+
+      // Reset then scale so drawing uses CSS pixel coords
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Always keep simulation geometry in CSS pixels
+    W = displayW;
+    H = displayH;
+    skierY = H * SKIER_Y_FRAC;
+  }
 
 
   // --- Wind as piecewise-constant velocity bias (px/s), updated every Uniform[10,20] seconds ---
@@ -299,72 +360,106 @@
   let windBias = 0;               // px/s (held constant between updates)
   let nextWindChangeT = 0;        // seconds
 
-  // --- WebAudio context (used for gate feedback tones) ---
+  // --- Audio (gate tones via WebAudio + wind whoosh via HTMLAudioElement) ---
+
   let audioCtx = null;
+
   function ensureAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-  function unlockWebAudioOnce() {
+
+  // One unified unlock that works across Chrome/Firefox/iOS
+  let audioUnlocked = false;
+  function unlockAudio() {
     try {
+      // 1) WebAudio unlock (gate tones, heartbeat)
       ensureAudio();
-      if (audioCtx.state !== "running") audioCtx.resume();
+      if (audioCtx && audioCtx.state !== "running") {
+        // In Firefox, resume() must happen during a user gesture
+        audioCtx.resume().catch(() => {});
+      }
+
+      // Mark unlocked once WebAudio is actually running
+      if (audioCtx && audioCtx.state === "running") {
+        audioUnlocked = true;
+      }
+
+      // 2) Prime the whoosh element (best-effort; may be blocked, that's OK)
+      // We try quietly; if blocked it will succeed later when user interacts again.
+      if (windWhoosh) {
+        const oldVol = windWhoosh.volume;
+        windWhoosh.volume = 0.0001; // nearly silent
+        const p = windWhoosh.play();
+        if (p && typeof p.then === "function") {
+          p.then(() => {
+            windWhoosh.pause();
+            windWhoosh.currentTime = 0;
+            windWhoosh.volume = oldVol;
+          }).catch(() => {
+            windWhoosh.volume = oldVol;
+          });
+        } else {
+          // Older browsers: play() might not return a promise
+          windWhoosh.pause();
+          windWhoosh.currentTime = 0;
+          windWhoosh.volume = oldVol;
+        }
+      }
     } catch (_) {}
-    window.removeEventListener("pointerdown", unlockWebAudioOnce);
-    window.removeEventListener("keydown", unlockWebAudioOnce);
   }
-  window.addEventListener("pointerdown", unlockWebAudioOnce, { once: true });
-  window.addEventListener("keydown", unlockWebAudioOnce, { once: true });
 
-  // --- Embedded wind "whoosh" sound ---
-  //const WIND_WHOOSH_DATA_URI = "data:audio/mp3;base64,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";
-  const WIND_WHOOSH_DATA_URI = "data:audio/mp3;base64,SUQzBAAAAAAAIlRTU0UAAAAOAAADTGF2ZjYxLjcuMTAwAAAAAAAAAAAAAAD/4zjAAAAAAAAAAAAASW5mbwAAAA8AAAAXAAAHUAAnJycnMTExMTs7Ozs7RERERE5OTk5YWFhYWGJiYmJsbGxsdnZ2dnaAgICAiYmJiZOTk5OTnZ2dnaenp6exsbGxsbu7u7vExMTEzs7Ozs7Y2NjY4uLi4uzs7Ozs9vb29v////8AAAAATGF2YzYxLjE5AAAAAAAAAAAAAAAAJAKgAAAAAAAAB1DAGN6dAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/4xjEAA1AteABTwABpl+/swIYoIJyKCJDV6vV8eAr47AhjI3nOo1ILmlyeCED8Uo3xc1ot51wk4oImX8f47wDB0f/0NB0r2b/4xjEBg3w3rgBj0gAK5KIs5s7+UCcagXYsSjOo+Lz6jro7gK5hCeqYaQb5uv/wBLoEbfMPH1XP/RxilKd/6nwuTYADU2YRTb/4xjECQ5o8u0ZyBgDO7auXjlXto/GEFHBqYsRGum5hC3GyI9QKILFo4d2qX//r7XUi6nm0Hg9Aj4DnQe/QmCXLQAPl8pIwnr/4xjECg7BRukYMkaDyeaXqR11n37rRgMYkDR4kabCHXWgibOxk/A0BCATsb1iCGlNoYXeFi4LEXuFW/fx3aUC3b+AMDnWEHH/4xjECg3BuwG4GYTCfyJKrtS4eVkYnrCQgjhZpoPsna227JKz2bMMFBLR0MRlO7N1fb2tkWx7sg/pgQCe3iQ4kGZ7ouQdREb/4xjEDgypEumgGwZNLezBz+/rbe76WIWHIr0uRQUgABVW60s3i9P88HqnwwMDjGKfJZmApLsAMOCBiwCGlKDuTOppyiyJEP//4xjEFgxpUwW4GEbC9gcAGVZlEgpZyi+qLdHv/wpE+dUVFXdVJTTZWqVAHLsAKgwpGOwwcUvwbW33a9PsIwgdlY/rP/4gKl3/4xjEHwyZLwG4EMROUd0sydxDQqMD5cMONP0vInl+aVUGmzZTq8MENF6U2ZKZSPs4z6UVIn0s8G+fpYU4m2Gnm0Dam+cLImL/4xjEJwwo7txAM8aHGl5SCJZKnkn36rAAbvyMIQvo96z5TscbHREKLCMC5NcUDQntWhr4qM5cX9S257tZ1f4w+O/a8adT1tD/4xjEMQwA+u2gSNYpFOQAB3+EyRMmxoyftyhqcWez7lW5eeaNCQnoPI9RzofDn7VeGOeesi2x5g+QMIKtpZ1IWQJcuAAyEIT=";
+  // Register “gesture” events. Do NOT use {once:true} for WebAudio;
+  // Firefox sometimes needs more than one successful gesture to get to "running".
+  window.addEventListener("pointerdown", unlockAudio, { passive: true });
+  window.addEventListener("mousedown",  unlockAudio, { passive: true });
+  window.addEventListener("touchstart", unlockAudio, { passive: true });
+  window.addEventListener("keydown",    unlockAudio);
 
-  // 
- 
+  // --- Embedded wind "whoosh" sound (your data URI above this) ---
   const windWhoosh = new Audio(WIND_WHOOSH_DATA_URI);
   windWhoosh.preload = "auto";
 
-  // Unlock audio on first user interaction (required by browsers)
-  function unlockAudioOnce() {
-    try {
-      windWhoosh.play().then(() => {
-        windWhoosh.pause();
-        windWhoosh.currentTime = 0;
-      }).catch(() => {});
-    } catch (_) {}
-    window.removeEventListener("pointerdown", unlockAudioOnce);
-    window.removeEventListener("keydown", unlockAudioOnce);
-  }
-
-  window.addEventListener("pointerdown", unlockAudioOnce, { once: true });
-  window.addEventListener("keydown", unlockAudioOnce, { once: true });
-
   function playWhoosh(intensity01) {
     try {
+      if (!audioUnlocked) unlockAudio();
+
       const vol = 0.12 + 0.25 * Math.max(0, Math.min(1, intensity01));
-      windWhoosh.volume = vol;
-      windWhoosh.currentTime = 0;
-      windWhoosh.play().catch(() => {});
+
+      // Create a fresh instance so it can't be cut off by reusing the same element
+      const a = windWhoosh.cloneNode(true);
+      a.volume = vol;
+      a.currentTime = 0;
+
+      // Clean up when finished (important to avoid piling up)
+      a.addEventListener("ended", () => {
+        try { a.src = ""; } catch (_) {}
+      }, { once: true });
+
+      a.play().catch(() => {});
     } catch (_) {}
   }
+
 
   // --- Gate feedback sounds ---
   function playPositive() {
     try {
       ensureAudio();
-      if (audioCtx.state !== "running") return;
+      if (audioCtx.state !== "running") {
+        unlockAudio();
+        if (audioCtx.state !== "running") return;
+      }
 
       const t0 = audioCtx.currentTime;
       const dur = 0.18;
 
       const osc = audioCtx.createOscillator();
-      osc.type = "sine";
+      osc.type = "triangle";
       osc.frequency.setValueAtTime(650, t0);
       osc.frequency.exponentialRampToValueAtTime(1100, t0 + dur);
 
       const g = audioCtx.createGain();
       g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.07, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.12, t0 + 0.015);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
       osc.connect(g);
@@ -377,7 +472,10 @@
   function playNegative() {
     try {
       ensureAudio();      
-      if (audioCtx.state !== "running") return;
+      if (audioCtx.state !== "running") {
+        unlockAudio();
+        if (audioCtx.state !== "running") return;
+      }
 
       const t0 = audioCtx.currentTime;      
       const dur = 0.28;
@@ -389,7 +487,7 @@
 
       const g = audioCtx.createGain();
       g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.10, t0 + 0.02);      
+      g.gain.exponentialRampToValueAtTime(0.15, t0 + 0.02);      
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
       osc.connect(g);
@@ -406,7 +504,10 @@
   function playHeartbeat(intensity01) {
     try {
       ensureAudio();
-      if (audioCtx.state !== "running") return;
+      if (audioCtx.state !== "running") {
+        unlockAudio();
+        if (audioCtx.state !== "running") return;
+      }   
 
       const t0 = audioCtx.currentTime;
       const dur = 0.12;
@@ -1002,7 +1103,16 @@
     updatePlantOverlay();
     resetAll();
   });
+
+
+
   // init
+  resizeCanvasToDisplaySize();
+
+  window.addEventListener("resize", () => {
+    resizeCanvasToDisplaySize();
+  });
+
   resetAll();
   updateSlopeSelectColor();
   updatePlantOverlay();
